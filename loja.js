@@ -1,61 +1,169 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-const db = require("./database");
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  Events
+} = require("discord.js");
 
-const LOJA = {
-  vip7: { nome: "VIP 7 Dias", preco: 10, cargo: "1472452088834424994", dias: 7 },
-  vip30: { nome: "VIP 30 Dias", preco: 40, cargo: "1472452205972947095", dias: 30 },
-  mira: { nome: "Mira Abusiva", preco: 45, cargo: "1472452374059684016" },
-  rei: { nome: "Rei da TK", preco: 25, cargo: "1472452481845035102" }
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds]
+});
+
+const TOKEN = "SEU_TOKEN";
+
+// ===== IDS DOS CARGOS =====
+const CARGOS = {
+  vip7: "1472452088834424994",
+  vip30: "1472452205972947095",
+  mira: "1472452374059684016",
+  rei: "1472452481845035102",
+
+  bronze: "1472458770008244471",
+  prata: "1472459013366222881",
+  gold: "1472459115694391306"
 };
 
-async function abrirLoja(interaction) {
-  const embed = new EmbedBuilder()
-    .setTitle("🛒 LOJA ORG TK")
-    .setDescription("Compre cargos exclusivos!\n\nEscolha abaixo:")
-    .setColor("Gold");
+// ===== BANCO =====
+let jogadores = {};
+let vips = {};
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("vip7").setLabel("VIP 7D - 10 moedas").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("vip30").setLabel("VIP 30D - 40 moedas").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("mira").setLabel("Mira - 45 moedas").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId("rei").setLabel("Rei - 25 moedas").setStyle(ButtonStyle.Success)
-  );
-
-  await interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
-}
-
-async function comprar(interaction) {
-  const item = LOJA[interaction.customId];
-  if (!item) return;
-
-  const user = interaction.user.id;
-  let perfil = await db.get(user);
-
-  if (!perfil || perfil.moedas < item.preco) {
-    return interaction.reply({ content: "❌ Você não tem moedas!", ephemeral: true });
-  }
-
-  perfil.moedas -= item.preco;
-  await db.set(user, perfil);
-
-  const membro = await interaction.guild.members.fetch(user);
-  const cargo = interaction.guild.roles.cache.get(item.cargo);
-
-  if (cargo) await membro.roles.add(cargo);
-
-  // VIP com expiração
-  if (item.dias) {
-    perfil.vip = {
-      cargo: item.cargo,
-      expira: Date.now() + item.dias * 86400000
+// ===== PERFIL =====
+function criarPerfil(id) {
+  if (!jogadores[id]) {
+    jogadores[id] = {
+      xp: 0,
+      moedas: 0 // SEM MOEDAS
     };
-    await db.set(user, perfil);
   }
-
-  interaction.reply({
-    content: `✅ Você comprou ${item.nome}!`,
-    ephemeral: true
-  });
 }
 
-module.exports = { abrirLoja, comprar };
+// ===== VIP EXPIRAÇÃO =====
+setInterval(async () => {
+  const agora = Date.now();
+
+  for (let id in vips) {
+    if (vips[id].expira <= agora) {
+      const guild = client.guilds.cache.first();
+      const membro = await guild.members.fetch(id).catch(() => null);
+
+      if (membro) {
+        membro.roles.remove(vips[id].cargo).catch(() => {});
+      }
+
+      delete vips[id];
+    }
+  }
+}, 60000);
+
+// ===== BOT ON =====
+client.once("ready", () => {
+  console.log(`Bot online: ${client.user.tag}`);
+});
+
+// ===== INTERAÇÕES =====
+client.on(Events.InteractionCreate, async interaction => {
+  if (!interaction.isButton()) return;
+
+  criarPerfil(interaction.user.id);
+
+  // ===== SORTE =====
+  if (interaction.customId === "sorte") {
+    let r = Math.random() * 100;
+    let premio;
+
+    if (r <= 50) {
+      jogadores[interaction.user.id].xp += 200;
+      premio = "200 XP";
+    } 
+    else if (r <= 80) {
+      jogadores[interaction.user.id].xp += 400;
+      premio = "400 XP";
+    } 
+    else if (r <= 90) {
+      jogadores[interaction.user.id].moedas += 100;
+      premio = "100 moedas";
+    } 
+    else {
+      jogadores[interaction.user.id].moedas += 200;
+      premio = "200 moedas";
+    }
+
+    await interaction.reply({
+      content: `🎁 Você ganhou **${premio}**!`,
+      ephemeral: true
+    });
+
+    atualizarCargos(interaction.member);
+  }
+
+  // ===== COMPRAR VIP =====
+  if (interaction.customId === "vip7") {
+    const tempo = 7 * 24 * 60 * 60 * 1000;
+
+    await interaction.member.roles.add(CARGOS.vip7);
+
+    vips[interaction.user.id] = {
+      cargo: CARGOS.vip7,
+      expira: Date.now() + tempo
+    };
+
+    interaction.reply({ content: "VIP 7 dias ativado!", ephemeral: true });
+  }
+
+  if (interaction.customId === "vip30") {
+    const tempo = 30 * 24 * 60 * 60 * 1000;
+
+    await interaction.member.roles.add(CARGOS.vip30);
+
+    vips[interaction.user.id] = {
+      cargo: CARGOS.vip30,
+      expira: Date.now() + tempo
+    };
+
+    interaction.reply({ content: "VIP 30 dias ativado!", ephemeral: true });
+  }
+});
+
+// ===== CARGOS AUTOMÁTICOS =====
+async function atualizarCargos(member) {
+  const xp = jogadores[member.id].xp;
+
+  if (xp >= 5000) member.roles.add(CARGOS.gold).catch(() => {});
+  else if (xp >= 2000) member.roles.add(CARGOS.prata).catch(() => {});
+  else if (xp >= 500) member.roles.add(CARGOS.bronze).catch(() => {});
+}
+
+// ===== COMANDO PAINEL =====
+client.on("messageCreate", async msg => {
+  if (msg.content === "!painel") {
+    const embed = new EmbedBuilder()
+      .setTitle("ORG TK 💸")
+      .setDescription("Vem farmar na ORG TK e ganhar XP, moedas e VIP!")
+      .setImage("https://cdn.discordapp.com/attachments/1471187076723769355/1472460920507601092/file_00000000488c720ebded7dce0dae06a6.png")
+      .setColor("Green");
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("sorte")
+        .setLabel("Sortear XP 💸")
+        .setStyle(ButtonStyle.Success),
+
+      new ButtonBuilder()
+        .setCustomId("vip7")
+        .setLabel("VIP 7D")
+        .setStyle(ButtonStyle.Primary),
+
+      new ButtonBuilder()
+        .setCustomId("vip30")
+        .setLabel("VIP 30D")
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    msg.channel.send({ embeds: [embed], components: [row] });
+  }
+});
+
+client.login(TOKEN);
