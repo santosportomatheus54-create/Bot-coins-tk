@@ -5,7 +5,10 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  Events
+  Events,
+  SlashCommandBuilder,
+  REST,
+  Routes
 } = require("discord.js");
 
 const client = new Client({
@@ -13,151 +16,92 @@ const client = new Client({
 });
 
 const TOKEN = process.env.TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+const GUILD_ID = process.env.GUILD_ID;
 
-// ===== IDS =====
-const CARGOS = {
-  vip7: "1472452088834424994",
-  vip30: "1472452205972947095",
+// ===== REGISTRAR SLASH =====
+const comandos = [
+  new SlashCommandBuilder()
+    .setName("painelmoeda")
+    .setDescription("Abrir painel de moedas")
+].map(c => c.toJSON());
 
-  bronze: "1472458770008244471",
-  prata: "1472459013366222881",
-  gold: "1472459115694391306"
-};
+const rest = new REST({ version: "10" }).setToken(TOKEN);
 
-// ===== BANCO =====
-let jogadores = {};
-let vips = {};
-
-function criarPerfil(id) {
-  if (!jogadores[id]) {
-    jogadores[id] = { xp: 0, moedas: 0 };
+(async () => {
+  try {
+    await rest.put(
+      Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
+      { body: comandos }
+    );
+    console.log("✅ Slash carregado");
+  } catch (err) {
+    console.error(err);
   }
-}
-
-// ===== EXPIRA VIP =====
-setInterval(async () => {
-  const guild = client.guilds.cache.first();
-  const agora = Date.now();
-
-  for (let id in vips) {
-    if (vips[id].expira <= agora) {
-      const membro = await guild.members.fetch(id).catch(() => null);
-      if (membro) membro.roles.remove(vips[id].cargo).catch(() => {});
-      delete vips[id];
-    }
-  }
-}, 60000);
+})();
 
 // ===== BOT ONLINE =====
 client.once("ready", () => {
   console.log(`🔥 Online: ${client.user.tag}`);
 });
 
-// ===== INTERAÇÕES =====
+// ===== SLASH =====
 client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isButton()) return;
 
-  try {
-    await interaction.deferReply({ ephemeral: true });
-    await new Promise(r => setTimeout(r, 2000));
+  // ===== COMANDO =====
+  if (interaction.isChatInputCommand()) {
+    if (interaction.commandName === "painelmoeda") {
 
-    criarPerfil(interaction.user.id);
+      await interaction.deferReply({ ephemeral: true });
 
-    let respondeu = false;
+      const embed = new EmbedBuilder()
+        .setTitle("💰 ORG TK")
+        .setDescription(
+          "Agora você ganha moedas!\n\n🎮 Use os botões abaixo!"
+        )
+        .setColor("Red");
 
-    // ===== SORTE =====
-    if (interaction.customId === "sorte") {
-      respondeu = true;
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("sorte")
+          .setLabel("Sortear")
+          .setStyle(ButtonStyle.Success),
 
-      let r = Math.random() * 100;
-      let premio;
+        new ButtonBuilder()
+          .setCustomId("vip7")
+          .setLabel("VIP 7D")
+          .setStyle(ButtonStyle.Primary),
 
-      if (r <= 50) {
-        jogadores[interaction.user.id].xp += 200;
-        premio = "200 XP";
-      } else if (r <= 80) {
-        jogadores[interaction.user.id].xp += 400;
-        premio = "400 XP";
-      } else if (r <= 90) {
-        jogadores[interaction.user.id].moedas += 100;
-        premio = "100 moedas";
-      } else {
-        jogadores[interaction.user.id].moedas += 200;
-        premio = "200 moedas";
-      }
+        new ButtonBuilder()
+          .setCustomId("vip30")
+          .setLabel("VIP 30D")
+          .setStyle(ButtonStyle.Primary)
+      );
 
-      await interaction.editReply(`🎁 Você ganhou **${premio}**!`);
-    }
-
-    // ===== VIP 7 =====
-    if (interaction.customId === "vip7") {
-      respondeu = true;
-
-      const tempo = 7 * 24 * 60 * 60 * 1000;
-      await interaction.member.roles.add(CARGOS.vip7);
-
-      vips[interaction.user.id] = {
-        cargo: CARGOS.vip7,
-        expira: Date.now() + tempo
-      };
-
-      await interaction.editReply("👑 VIP 7 dias ativado!");
-    }
-
-    // ===== VIP 30 =====
-    if (interaction.customId === "vip30") {
-      respondeu = true;
-
-      const tempo = 30 * 24 * 60 * 60 * 1000;
-      await interaction.member.roles.add(CARGOS.vip30);
-
-      vips[interaction.user.id] = {
-        cargo: CARGOS.vip30,
-        expira: Date.now() + tempo
-      };
-
-      await interaction.editReply("👑 VIP 30 dias ativado!");
-    }
-
-    // 🔥 Fallback (IMPOSSÍVEL travar)
-    if (!respondeu) {
-      await interaction.editReply("⚠️ Botão ainda não configurado.");
-    }
-
-  } catch (err) {
-    console.error(err);
-    if (interaction.deferred) {
-      await interaction.editReply("❌ Erro inesperado.");
+      await interaction.editReply({
+        embeds: [embed],
+        components: [row]
+      });
     }
   }
-});
 
-// ===== PAINEL =====
-client.on("messageCreate", async msg => {
-  if (msg.content === "!painel") {
-    const embed = new EmbedBuilder()
-      .setTitle("ORG TK 💸")
-      .setDescription("Use os botões abaixo para ganhar recompensas!")
-      .setColor("Red");
+  // ===== BOTÕES =====
+  if (interaction.isButton()) {
+    await interaction.deferReply({ ephemeral: true });
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("sorte")
-        .setLabel("Sortear 💸")
-        .setStyle(ButtonStyle.Success),
+    if (interaction.customId === "sorte") {
+      return interaction.editReply("🎁 Você ganhou recompensa!");
+    }
 
-      new ButtonBuilder()
-        .setCustomId("vip7")
-        .setLabel("VIP 7D")
-        .setStyle(ButtonStyle.Primary),
+    if (interaction.customId === "vip7") {
+      return interaction.editReply("👑 VIP 7 dias ativado!");
+    }
 
-      new ButtonBuilder()
-        .setCustomId("vip30")
-        .setLabel("VIP 30D")
-        .setStyle(ButtonStyle.Primary)
-    );
+    if (interaction.customId === "vip30") {
+      return interaction.editReply("👑 VIP 30 dias ativado!");
+    }
 
-    msg.channel.send({ embeds: [embed], components: [row] });
+    return interaction.editReply("⚠️ Botão não configurado.");
   }
 });
 
