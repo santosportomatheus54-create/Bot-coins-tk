@@ -12,10 +12,18 @@ const {
 const fs = require("fs");
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
 });
 
 const TOKEN = process.env.TOKEN;
+
+// ===== CARGOS =====
+const CARGOS = {
+  VIP7: "1472452088834424994",
+  VIP30: "1472452205972947095",
+  REI: "1472452374059684016",
+  MIRA: "1472452481845035102"
+};
 
 // ===== BANCO =====
 function loadDB() {
@@ -25,36 +33,69 @@ function saveDB(db) {
   fs.writeFileSync("./database.json", JSON.stringify(db, null, 2));
 }
 
-// ===== XP e LIGA =====
-function calcularLiga(xp) {
-  if (xp >= 5000) return "Diamante";
-  if (xp >= 2500) return "Ouro";
-  if (xp >= 1000) return "Prata";
-  return "Bronze";
+// ===== VIP =====
+function adicionarVIP(db, id, dias) {
+  const agora = Date.now();
+  const tempo = dias * 24 * 60 * 60 * 1000;
+
+  if (!db[id].vip) db[id].vip = [];
+  db[id].vip.push({ expira: agora + tempo });
 }
 
-// ===== COMANDOS SLASH =====
+// ===== SLASH =====
 const commands = [
   new SlashCommandBuilder()
     .setName("painelmoeda")
-    .setDescription("Painel de moedas e ranking"),
+    .setDescription("Painel de moedas")
 ];
 
 client.once("ready", async () => {
   console.log("Bot online");
 
   const rest = new REST({ version: "10" }).setToken(TOKEN);
-
   await rest.put(
     Routes.applicationCommands(client.user.id),
     { body: commands }
   );
+
+  // ===== VERIFICAR VIP =====
+  setInterval(async () => {
+    const db = loadDB();
+
+    for (let user in db) {
+
+      if (!db[user].vip) continue;
+
+      const membro = await client.guilds.cache
+        .first()
+        .members.fetch(user)
+        .catch(() => null);
+
+      if (!membro) continue;
+
+      const agora = Date.now();
+
+      db[user].vip = db[user].vip.filter(async (v) => {
+
+        if (agora > v.expira) {
+
+          await membro.roles.remove(CARGOS.VIP7).catch(() => {});
+          await membro.roles.remove(CARGOS.VIP30).catch(() => {});
+
+          return false;
+        }
+
+        return true;
+      });
+    }
+
+    saveDB(db);
+  }, 60000);
 });
 
-// ===== INTERAÇÕES =====
+// ===== INTERAÇÃO =====
 client.on("interactionCreate", async (interaction) => {
 
-  // ===== SLASH =====
   if (interaction.isChatInputCommand()) {
 
     if (interaction.commandName === "painelmoeda") {
@@ -67,29 +108,15 @@ client.on("interactionCreate", async (interaction) => {
 Use suas moedas pra comprar itens na loja e subir no ranking 🏆
 Os prêmios ficam no inventário e podem ser resgatados em até 10 dias
 🎮 Confira suas moedas, ranking e inventário nos botões abaixo!`
-        )
-        .setImage("https://i.imgur.com/8Km9tLL.png");
+        );
 
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId("perfil")
-          .setLabel("Perfil")
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId("loja")
-          .setLabel("Loja")
-          .setStyle(ButtonStyle.Success),
-        new ButtonBuilder()
-          .setCustomId("inventario")
-          .setLabel("Inventário")
-          .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-          .setCustomId("caixa")
-          .setLabel("Abrir Caixa")
-          .setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId("perfil").setLabel("Perfil").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("loja").setLabel("Loja").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("inventario").setLabel("Inventário").setStyle(ButtonStyle.Secondary)
       );
 
-      interaction.reply({ embeds: [embed], components: [row] });
+      return interaction.reply({ embeds: [embed], components: [row] });
     }
   }
 
@@ -97,46 +124,94 @@ Os prêmios ficam no inventário e podem ser resgatados em até 10 dias
   if (interaction.isButton()) {
 
     const db = loadDB();
-    const user = interaction.user.id;
+    const id = interaction.user.id;
 
-    if (!db[user]) {
-      db[user] = {
-        coins: 0,
-        xp: 0,
-        inventario: []
-      };
+    if (!db[id]) {
+      db[id] = { coins: 100, inventario: [] };
     }
 
     // ===== PERFIL =====
     if (interaction.customId === "perfil") {
 
-      const liga = calcularLiga(db[user].xp);
-
       const embed = new EmbedBuilder()
         .setColor("Red")
-        .setTitle(`Perfil de ${interaction.user.username}`)
-        .addFields(
-          { name: "Moedas", value: `${db[user].coins}`, inline: true },
-          { name: "XP", value: `${db[user].xp}`, inline: true },
-          { name: "Liga", value: liga, inline: true }
-        );
+        .setTitle("Seu Perfil")
+        .addFields({ name: "Moedas", value: `${db[id].coins}` });
 
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
 
     // ===== LOJA =====
     if (interaction.customId === "loja") {
-      const loja = JSON.parse(fs.readFileSync("./loja.json"));
-
-      let texto = "";
-      for (let item in loja) {
-        texto += `**${item}** - ${loja[item]} moedas\n`;
-      }
 
       const embed = new EmbedBuilder()
         .setColor("Red")
-        .setTitle("🛒 Loja")
-        .setDescription(texto);
+        .setTitle("🛒 Loja");
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("vip7").setLabel("VIP 7D (10)").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("vip30").setLabel("VIP 30D (40)").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("rei").setLabel("Rei TK (25)").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("mira").setLabel("Mira Abusiva (45)").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId("caixa").setLabel("Caixa (25)").setStyle(ButtonStyle.Danger)
+      );
+
+      return interaction.reply({ embeds: [embed], components: [row], ephemeral: true });
+    }
+
+    // ===== FUNÇÃO COMPRA =====
+    async function comprar(preco, cargo, nome) {
+
+      if (db[id].coins < preco)
+        return interaction.reply({ content: "Sem moedas!", ephemeral: true });
+
+      db[id].coins -= preco;
+      db[id].inventario.push(nome);
+      saveDB(db);
+
+      if (cargo) {
+        const membro = await interaction.guild.members.fetch(id);
+        await membro.roles.add(cargo);
+      }
+
+      return interaction.reply({ content: `Comprado: ${nome}`, ephemeral: true });
+    }
+
+    // ===== VIP =====
+    if (interaction.customId === "vip7") {
+      adicionarVIP(db, id, 7);
+      return comprar(10, CARGOS.VIP7, "VIP 7 dias");
+    }
+
+    if (interaction.customId === "vip30") {
+      adicionarVIP(db, id, 30);
+      return comprar(40, CARGOS.VIP30, "VIP 30 dias");
+    }
+
+    if (interaction.customId === "rei")
+      return comprar(25, CARGOS.REI, "Rei da TK");
+
+    if (interaction.customId === "mira")
+      return comprar(45, CARGOS.MIRA, "Mira Abusiva");
+
+    // ===== CAIXA =====
+    if (interaction.customId === "caixa") {
+
+      if (db[id].coins < 25)
+        return interaction.reply({ content: "Sem moedas!", ephemeral: true });
+
+      db[id].coins -= 25;
+
+      const premios = [50, 100, 200];
+      const ganho = premios[Math.floor(Math.random() * premios.length)];
+
+      db[id].coins += ganho;
+      saveDB(db);
+
+      const embed = new EmbedBuilder()
+        .setColor("Red")
+        .setTitle("🎁 Caixa Misteriosa")
+        .setDescription(`Você ganhou ${ganho} moedas!`);
 
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
@@ -144,41 +219,14 @@ Os prêmios ficam no inventário e podem ser resgatados em até 10 dias
     // ===== INVENTÁRIO =====
     if (interaction.customId === "inventario") {
 
-      const itens = db[user].inventario.length > 0
-        ? db[user].inventario.join("\n")
+      const itens = db[id].inventario.length > 0
+        ? db[id].inventario.join("\n")
         : "Nenhum item";
 
       const embed = new EmbedBuilder()
         .setColor("Red")
         .setTitle("🎒 Inventário")
         .setDescription(itens);
-
-      return interaction.reply({ embeds: [embed], ephemeral: true });
-    }
-
-    // ===== CAIXA =====
-    if (interaction.customId === "caixa") {
-
-      const caixas = JSON.parse(fs.readFileSync("./caixas.json"));
-      const recompensas = caixas.comum;
-
-      const premio =
-        recompensas[Math.floor(Math.random() * recompensas.length)];
-
-      if (premio.tipo === "coins") {
-        db[user].coins += premio.valor;
-      }
-
-      if (premio.tipo === "xp") {
-        db[user].xp += premio.valor;
-      }
-
-      saveDB(db);
-
-      const embed = new EmbedBuilder()
-        .setColor("Red")
-        .setTitle("🎁 Caixa Misteriosa")
-        .setDescription(`Você ganhou: ${premio.tipo} ${premio.valor || ""}`);
 
       return interaction.reply({ embeds: [embed], ephemeral: true });
     }
