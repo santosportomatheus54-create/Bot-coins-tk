@@ -1,0 +1,8 @@
+{
+  "comum": [
+    { "tipo": "coins", "valor": 50 },
+    { "tipo": "coins", "valor": 100 },
+    { "tipo": "xp", "valor": 40 },
+    { "tipo": "xp", "valor": 80 }
+  ]
+}
