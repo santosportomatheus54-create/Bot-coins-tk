@@ -5,164 +5,174 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  Events
 } = require("discord.js");
 
-const fs = require("fs");
-
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
+  intents: [GatewayIntentBits.Guilds]
 });
 
+// 🔑 TOKEN
 const TOKEN = process.env.TOKEN;
 
-// ===== IDS =====
-const ROLES = {
-  VIP7: "1472452088834424994",
-  VIP30: "1472452205972947095",
-  MIRA: "1472452374059684016",
-  REI: "1472452481845035102",
+// ===== IDS DOS CARGOS =====
+const CARGOS = {
+  vip7: "1472452088834424994",
+  vip30: "1472452205972947095",
+  mira: "1472452374059684016",
+  rei: "1472452481845035102",
 
-  BRONZE: "1472458770008244471",
-  PRATA: "1472459013366222881",
-  GOLD: "1472459115694391306",
+  bronze: "1472458770008244471",
+  prata: "1472459013366222881",
+  gold: "1472459115694391306"
 };
 
-// ===== DATABASE =====
-let db = {};
-if (fs.existsSync("db.json")) {
-  db = JSON.parse(fs.readFileSync("db.json"));
-}
+// ===== BANCO =====
+let jogadores = {};
+let vips = {};
 
-function salvar() {
-  fs.writeFileSync("db.json", JSON.stringify(db, null, 2));
-}
-
-// ===== CRIAR PERFIL =====
-function perfil(id) {
-  if (!db[id]) {
-    db[id] = {
-      coins: 0,
+// ===== PERFIL =====
+function criarPerfil(id) {
+  if (!jogadores[id]) {
+    jogadores[id] = {
       xp: 0,
-      vip: 0,
+      moedas: 0
     };
-    salvar();
   }
 }
 
-// ===== LIGAS =====
-async function atualizarLiga(member, id) {
-  const xp = db[id].xp;
-
-  if (xp >= 2000) {
-    await member.roles.add(ROLES.GOLD).catch(() => {});
-  } else if (xp >= 1000) {
-    await member.roles.add(ROLES.PRATA).catch(() => {});
-  } else {
-    await member.roles.add(ROLES.BRONZE).catch(() => {});
-  }
-}
-
-// ===== VIP EXPIRA =====
+// ===== VIP EXPIRAÇÃO =====
 setInterval(async () => {
-  for (let id in db) {
-    if (db[id].vip && db[id].vip < Date.now()) {
-      const guilds = client.guilds.cache;
-      guilds.forEach(async (g) => {
-        const m = await g.members.fetch(id).catch(() => null);
-        if (m) {
-          m.roles.remove(ROLES.VIP7).catch(() => {});
-          m.roles.remove(ROLES.VIP30).catch(() => {});
-        }
-      });
-      db[id].vip = 0;
+  const agora = Date.now();
+  const guild = client.guilds.cache.first();
+
+  for (let id in vips) {
+    if (vips[id].expira <= agora) {
+      const membro = await guild.members.fetch(id).catch(() => null);
+      if (membro) {
+        membro.roles.remove(vips[id].cargo).catch(() => {});
+      }
+      delete vips[id];
     }
   }
-  salvar();
 }, 60000);
 
-// ===== READY =====
-client.on("ready", () => {
-  console.log(`Online como ${client.user.tag}`);
+// ===== BOT ON =====
+client.once("ready", () => {
+  console.log(`🔥 Bot online: ${client.user.tag}`);
 });
 
-// ===== SLASH =====
-client.on("interactionCreate", async (i) => {
-  if (!i.isChatInputCommand()) return;
+// ===== INTERAÇÕES =====
+client.on(Events.InteractionCreate, async interaction => {
+  if (!interaction.isButton() && !interaction.isChatInputCommand()) return;
 
-  if (i.commandName === "painel") {
+  try {
+    // ⚡ resposta rápida
+    await interaction.deferReply({ ephemeral: true });
+
+    // ⏳ delay 2s
+    await new Promise(r => setTimeout(r, 2000));
+
+    criarPerfil(interaction.user.id);
+
+    // ===== BOTÃO SORTE =====
+    if (interaction.customId === "sorte") {
+      let r = Math.random() * 100;
+      let premio;
+
+      if (r <= 50) {
+        jogadores[interaction.user.id].xp += 200;
+        premio = "200 XP";
+      } else if (r <= 80) {
+        jogadores[interaction.user.id].xp += 400;
+        premio = "400 XP";
+      } else if (r <= 90) {
+        jogadores[interaction.user.id].moedas += 100;
+        premio = "100 moedas";
+      } else {
+        jogadores[interaction.user.id].moedas += 200;
+        premio = "200 moedas";
+      }
+
+      await interaction.editReply(`🎁 Você ganhou **${premio}**!`);
+      atualizarCargos(interaction.member);
+    }
+
+    // ===== VIP 7D =====
+    if (interaction.customId === "vip7") {
+      const tempo = 7 * 24 * 60 * 60 * 1000;
+
+      await interaction.member.roles.add(CARGOS.vip7);
+
+      vips[interaction.user.id] = {
+        cargo: CARGOS.vip7,
+        expira: Date.now() + tempo
+      };
+
+      await interaction.editReply("👑 VIP 7 dias ativado!");
+    }
+
+    // ===== VIP 30D =====
+    if (interaction.customId === "vip30") {
+      const tempo = 30 * 24 * 60 * 60 * 1000;
+
+      await interaction.member.roles.add(CARGOS.vip30);
+
+      vips[interaction.user.id] = {
+        cargo: CARGOS.vip30,
+        expira: Date.now() + tempo
+      };
+
+      await interaction.editReply("👑 VIP 30 dias ativado!");
+    }
+
+  } catch (err) {
+    console.error(err);
+    if (interaction.deferred) {
+      await interaction.editReply("❌ Erro no comando.");
+    }
+  }
+});
+
+// ===== CARGOS AUTOMÁTICOS =====
+async function atualizarCargos(member) {
+  const xp = jogadores[member.id].xp;
+
+  if (xp >= 5000) await member.roles.add(CARGOS.gold).catch(() => {});
+  else if (xp >= 2000) await member.roles.add(CARGOS.prata).catch(() => {});
+  else if (xp >= 500) await member.roles.add(CARGOS.bronze).catch(() => {});
+}
+
+// ===== PAINEL =====
+client.on("messageCreate", async msg => {
+  if (msg.content === "!painel") {
     const embed = new EmbedBuilder()
-      .setColor("Red")
-      .setImage("https://cdn.discordapp.com/attachments/1471187076723769355/1472460920507601092/file_00000000488c720ebded7dce0dae06a6.png")
+      .setTitle("ORG TK 💸")
       .setDescription(
-        "Agora você ganha 1 moeda por partida!\nUse suas moedas pra comprar itens na loja e subir no ranking 🏆\nOs prêmios ficam no inventário e podem ser resgatados em até 10 dias.\n🎮 Confira suas moedas, ranking e inventário nos botões abaixo!"
-      );
+        "Agora você ganha 1 moeda por partida!\nUse suas moedas pra comprar itens na loja e subir no ranking 🏆"
+      )
+      .setImage("https://cdn.discordapp.com/attachments/1471187076723769355/1472460920507601092/file_00000000488c720ebded7dce0dae06a6.png")
+      .setColor("Red");
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId("perfil")
-        .setLabel("Perfil")
+        .setCustomId("sorte")
+        .setLabel("Sortear 💸")
         .setStyle(ButtonStyle.Success),
 
       new ButtonBuilder()
-        .setCustomId("sorte")
-        .setLabel("Sorte")
-        .setStyle(ButtonStyle.Danger)
+        .setCustomId("vip7")
+        .setLabel("VIP 7D")
+        .setStyle(ButtonStyle.Primary),
+
+      new ButtonBuilder()
+        .setCustomId("vip30")
+        .setLabel("VIP 30D")
+        .setStyle(ButtonStyle.Primary)
     );
 
-    i.reply({ embeds: [embed], components: [row] });
+    msg.channel.send({ embeds: [embed], components: [row] });
   }
 });
 
-// ===== BOTÕES =====
-client.on("interactionCreate", async (i) => {
-  if (!i.isButton()) return;
-
-  perfil(i.user.id);
-
-  if (i.customId === "perfil") {
-    const p = db[i.user.id];
-
-    const embed = new EmbedBuilder()
-      .setColor("Red")
-      .setTitle(`Perfil de ${i.user.username}`)
-      .setDescription(
-        `💰 Coins: ${p.coins}\n📈 XP: ${p.xp}`
-      );
-
-    i.reply({ embeds: [embed], ephemeral: true });
-  }
-
-  if (i.customId === "sorte") {
-    const sorte = Math.random() * 100;
-    let resultado;
-
-    if (sorte <= 50) {
-      db[i.user.id].xp += 200;
-      resultado = "200 XP";
-    } else if (sorte <= 80) {
-      db[i.user.id].xp += 400;
-      resultado = "400 XP";
-    } else if (sorte <= 90) {
-      db[i.user.id].coins += 100;
-      resultado = "100 moedas";
-    } else if (sorte <= 93) {
-      db[i.user.id].coins += 200;
-      resultado = "200 moedas";
-    } else {
-      db[i.user.id].coins += 20;
-      resultado = "20 moedas";
-    }
-
-    salvar();
-
-    await atualizarLiga(i.member, i.user.id);
-
-    i.reply({
-      content: `🎰 Você ganhou ${resultado}`,
-      ephemeral: true,
-    });
-  }
-});
-
-// ===== LOGIN =====
 client.login(TOKEN);
